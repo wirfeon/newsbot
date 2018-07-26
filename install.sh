@@ -1,5 +1,7 @@
 #!/bin/bash
 
+#set -v
+
 P=/www/newsbot
 S=$PWD
 SERVICE_NAME=bot.news

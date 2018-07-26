@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Group title : Group id
 # Bot forwards messages from group identified by title to group identified by id
-source = {-277686843}
+source = -277686843
 target = set()
 
 try:
@@ -44,16 +44,30 @@ except Exception as e:
     logger.warn("Exception: %s" % e)
 
 logger.info(target)
+def sendid(chat):
+    chat.send_message(chat.id)
 
 def showid(bot, update):
-    update.message.chat.send_message(update.message.chat.id)
+    logger.info("Showid")
+    sendid(update.message.chat)
 
 def publish(bot, update):
-    if (update.message.chat.id in source):
+    logger.info("Publish")
+    if (update.message.chat.id == source):
+        sent= []
+
         for tid in target:
             logger.info("Publish in %d" % tid)
-            bot.send_message(tid, update.message.text)
+            smsg = bot.send_message(tid, update.message.text)
+            sent.append((smsg.chat.id, smsg.message_id))            
 
+    f = open("data/messages.txt", "a")
+    f.write(json.dumps({update.message.message_id: sent}))
+    f.write("\n")
+    f.close()
+
+    bot.send_message(update.message.chat.id, update.message.message_id)
+        
 def dump_target():
     try:
         db = open("data/groups.txt", "w")
@@ -79,6 +93,68 @@ def left_chat_member(bot, update):
         if (update.message.chat.id in target):
             target.remove(update.message.chat.id)
             dump_target()
+
+def edit(bot, update):
+    logger.info("Edit message")
+
+    strid = "%d" % update.edited_message.message_id
+    f = open("data/messages.txt", "r")
+    line = f.readline()
+    while line:
+        msg = json.loads(line.strip())
+        if strid in msg:
+            logger.info("Edit %d" % update.edited_message.message_id)
+
+            for chat in msg[strid]:
+                bot.edit_message_text(update.edited_message.text, chat[0], chat[1])
+
+            break
+
+        line = f.readline()
+
+    f.close()
+
+def delete(bot, update):
+    logger.info("Delete message")
+
+    tid = 0
+    chat = None
+    if (update.channel_post):
+        tid = update.channel_post.text.split("/delete")[1].strip()
+        chat = update.channel_post.chat
+    elif (update.message):
+        tid = update.message.text.split("/delete")[1].strip()
+        chat = update.message.chat
+    else:
+        return
+
+    if (chat.id != source):
+        return
+
+    f = open("data/messages.txt", "r")
+    line = f.readline()
+    while line:
+        msg = json.loads(line.strip())
+        if tid in msg:
+            logger.info("Delete %s" % tid)
+
+            for chat in msg[tid]:
+                bot.delete_message(chat[0], chat[1])
+
+            break
+
+        line = f.readline()
+
+    f.close()
+
+def fallback(bot, update):
+    if (update.channel_post):
+        logger.info("Channel post %d" % update.channel_post.message_id)
+        if (len(update.channel_post.entities) and update.channel_post.entities[0].type == "bot_command"):
+            if (update.channel_post.text[0:7] == "/showid"):
+                sendid(update.channel_post.chat)
+    else:
+        publish(bot, update)
 
 def error(bot, update, error):
     """Log Errors caused by Updates."""
@@ -110,10 +186,13 @@ def main():
     # Get the dispatcher to register handlers
     dp = updater.dispatcher
 
-    dp.add_handler(CommandHandler("showid", showid))
+    dp.add_handler(CommandHandler("showid", showid, filters = Filters.all))
+    dp.add_handler(CommandHandler("delete", delete))
     dp.add_handler(MessageHandler(Filters.text, publish))
     dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, new_chat_members))
     dp.add_handler(MessageHandler(Filters.status_update.left_chat_member, left_chat_member))
+    dp.add_handler(MessageHandler(Filters.text, edit, message_updates = False, channel_post_updates = False, edited_updates = True))
+    dp.add_handler(MessageHandler(Filters.all, fallback))
 
     # log all errors
     dp.add_error_handler(error)
