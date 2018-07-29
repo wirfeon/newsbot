@@ -7,7 +7,7 @@ import os
 import time
 import sys
 from copy import copy
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Handler
 from telegram import Chat
 from datetime import datetime
 
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Group title : Group id
 # Bot forwards messages from group identified by title to group identified by id
 source = -277686843
+test = -254343904
 target = set()
 
 try:
@@ -54,20 +55,37 @@ def showid(bot, update):
 def publish(bot, update):
     logger.info("Publish")
     if (update.message.chat.id == source):
-        sent= []
+        sent = []
 
         for tid in target:
             logger.info("Publish in %d" % tid)
             smsg = bot.send_message(tid, update.message.text)
             sent.append((smsg.chat.id, smsg.message_id))            
 
-    f = open("data/messages.txt", "a")
-    f.write(json.dumps({update.message.message_id: sent}))
-    f.write("\n")
-    f.close()
+        f = open("data/messages.txt", "a")
+        f.write(json.dumps({update.message.message_id: sent}))
+        f.write("\n")
+        f.close()
 
-    bot.send_message(update.message.chat.id, update.message.message_id)
-        
+        bot.send_message(update.message.chat.id, update.message.message_id)
+
+def forward(bot, update):
+    logger.info("Forward")
+    if (update.message.chat.id == source):
+        sent = []
+
+        for tid in target:
+            logger.info("Publish in %d" % tid)
+            smsg = bot.forward_message(tid, update.message.chat.id, update.message.message_id)
+            sent.append((smsg.chat.id, smsg.message_id))            
+
+        f = open("data/messages.txt", "a")
+        f.write(json.dumps({update.message.message_id: sent}))
+        f.write("\n")
+        f.close()
+
+        bot.send_message(update.message.chat.id, update.message.message_id)
+
 def dump_target():
     try:
         db = open("data/groups.txt", "w")
@@ -82,7 +100,7 @@ def dump_target():
 def new_chat_members(bot, update):
     logger.info("Added to chat")
 
-    if ((update.message.chat.id not in target) and (update.message.chat.id not in source)):
+    if ((update.message.chat.id not in target) and (update.message.chat.id != source)):
         target.add(update.message.chat.id)
         dump_target()
 
@@ -96,6 +114,8 @@ def left_chat_member(bot, update):
 
 def edit(bot, update):
     logger.info("Edit message")
+
+    if (update.edited_message.chat.id != source): return
 
     strid = "%d" % update.edited_message.message_id
     f = open("data/messages.txt", "r")
@@ -116,6 +136,8 @@ def edit(bot, update):
 
 def delete(bot, update):
     logger.info("Delete message")
+    
+    if (update.message.chat.id != source): return
 
     tid = 0
     chat = None
@@ -147,14 +169,28 @@ def delete(bot, update):
 
     f.close()
 
-def fallback(bot, update):
+def test(bot, update):
+    logger.info("Test")
+    
+    if (update.message.chat.id != source): return
+
+    cmd = update.message.text.split("/delete")
+
+    if (len(cmd) == 1):
+        if (status == 0):
+            bot.send_message(source, "Testing mode: Bot is forwarding to  group only")
+        else:
+            bot.send_message(source, "Production mode: Bot is forwarding to all chats")
+        
+
+def fallback(bot, update, user_data, job_queue, chat_data, update_queue):
+    logger.info("Fallback")
+
     if (update.channel_post):
         logger.info("Channel post %d" % update.channel_post.message_id)
         if (len(update.channel_post.entities) and update.channel_post.entities[0].type == "bot_command"):
             if (update.channel_post.text[0:7] == "/showid"):
                 sendid(update.channel_post.chat)
-    else:
-        publish(bot, update)
 
 def error(bot, update, error):
     """Log Errors caused by Updates."""
@@ -186,13 +222,15 @@ def main():
     # Get the dispatcher to register handlers
     dp = updater.dispatcher
 
-    dp.add_handler(CommandHandler("showid", showid, filters = Filters.all))
+    dp.add_handler(CommandHandler("showid", showid))
     dp.add_handler(CommandHandler("delete", delete))
+    dp.add_handler(CommandHandler("test", delete))
     dp.add_handler(MessageHandler(Filters.text, publish))
+    dp.add_handler(MessageHandler(Filters.photo | Filters.document | Filters.voice | Filters.video | Filters.sticker | Filters.video_note | Filters.contact | Filters.venue | Filters.location, forward))
     dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, new_chat_members))
     dp.add_handler(MessageHandler(Filters.status_update.left_chat_member, left_chat_member))
     dp.add_handler(MessageHandler(Filters.text, edit, message_updates = False, channel_post_updates = False, edited_updates = True))
-    dp.add_handler(MessageHandler(Filters.all, fallback))
+    #dp.add_handler(MessageHandler(Filters.all, fallback))
 
     # log all errors
     dp.add_error_handler(error)
