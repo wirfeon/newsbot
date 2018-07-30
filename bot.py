@@ -28,31 +28,53 @@ logger = logging.getLogger(__name__)
 source = -277686843
 test = -254343904
 target = set()
+state = 0
 
-try:
-    db = open("data/groups.txt", "r")
-    line = db.readline()
-    while line:
+def loadgroups():        
+    global target, test, source, state
+
+    f = open("data/status.txt", "r")
+    state = int(f.read().strip())
+    f.close()
+
+    if (state == 0):
+        target = set((test,))
+    elif (state == 1):
         try:
-            target.add(int(line));
+            db = open("data/groups.txt", "r")
+            line = db.readline()
+            while line:
+                try:
+                    target.add(int(line));
+                except Exception as e:
+                    logger.warn("Exception: %s" % e)
+                
+                line = db.readline()
+            
+            db.close()
         except Exception as e:
             logger.warn("Exception: %s" % e)
-        
-        line = db.readline()
-    
-    db.close()
-except Exception as e:
-    logger.warn("Exception: %s" % e)
 
-logger.info(target)
+        logger.info("Target groups: %s" % target)
+    else:
+        logger.error("Invalid state")
+
+loadgroups()
+
 def sendid(chat):
+    global target, test, source, state
+
     chat.send_message(chat.id)
 
 def showid(bot, update):
+    global target, test, source, state
+
     logger.info("Showid")
     sendid(update.message.chat)
 
 def publish(bot, update):
+    global target, test, source, state
+
     logger.info("Publish")
     if (update.message.chat.id == source):
         sent = []
@@ -70,6 +92,8 @@ def publish(bot, update):
         bot.send_message(update.message.chat.id, update.message.message_id)
 
 def forward(bot, update):
+    global target, test, source, state
+
     logger.info("Forward")
     if (update.message.chat.id == source):
         sent = []
@@ -87,6 +111,8 @@ def forward(bot, update):
         bot.send_message(update.message.chat.id, update.message.message_id)
 
 def dump_target():
+    global target, test, source, state
+
     try:
         db = open("data/groups.txt", "w")
 
@@ -98,6 +124,12 @@ def dump_target():
         logger.warn("Exception: %s" % e)
 
 def new_chat_members(bot, update):
+    global target, test, source, state
+
+    if (state == 0):
+        logger.warn("State is OFF")
+        return
+    
     logger.info("Added to chat")
 
     if ((update.message.chat.id not in target) and (update.message.chat.id != source)):
@@ -105,6 +137,12 @@ def new_chat_members(bot, update):
         dump_target()
 
 def left_chat_member(bot, update):
+    global target, test, source, state
+    
+    if (state == 0):
+        logger.warn("State is OFF")
+        return
+    
     logger.info("Left chat")
 
     if (update.message.left_chat_member.id == bot.id):
@@ -113,6 +151,8 @@ def left_chat_member(bot, update):
             dump_target()
 
 def edit(bot, update):
+    global target, test, source, state
+
     logger.info("Edit message")
 
     if (update.edited_message.chat.id != source): return
@@ -135,6 +175,8 @@ def edit(bot, update):
     f.close()
 
 def delete(bot, update):
+    global target, test, source, state
+
     logger.info("Delete message")
     
     if (update.message.chat.id != source): return
@@ -169,28 +211,55 @@ def delete(bot, update):
 
     f.close()
 
-def test(bot, update):
-    logger.info("Test")
+def status(bot, update):
+    global target, test, source, state
+
+    logger.info("Status")
     
     if (update.message.chat.id != source): return
 
-    cmd = update.message.text.split("/delete")
+    if (state == 0):
+        bot.send_message(source, "OFF")
+    else:
+        bot.send_message(source, "ON")
 
-    if (len(cmd) == 1):
-        if (status == 0):
-            bot.send_message(source, "Testing mode: Bot is forwarding to  group only")
+def setstatus(bot, update):
+    global target, test, source, state
+
+    logger.info("Set status")
+
+    cmd = update.message.text.split("/setstatus")
+
+    if (len(cmd) == 2):
+        new_state = cmd[1].strip().lower()
+
+        if (new_state == "off"):
+            f = open("data/status.txt", "w")
+            f.write("0")
+            f.close()
+ 
+
+        elif (new_state == "on"):
+            f = open("data/status.txt", "w")
+            f.write("1")
+            f.close()
+
         else:
-            bot.send_message(source, "Production mode: Bot is forwarding to all chats")
-        
+            bot.send_message(source, "Invalid command")
+            return
 
-def fallback(bot, update, user_data, job_queue, chat_data, update_queue):
-    logger.info("Fallback")
+        loadgroups()
 
-    if (update.channel_post):
-        logger.info("Channel post %d" % update.channel_post.message_id)
-        if (len(update.channel_post.entities) and update.channel_post.entities[0].type == "bot_command"):
-            if (update.channel_post.text[0:7] == "/showid"):
-                sendid(update.channel_post.chat)
+        logger.info("Status: '%s'" % state)
+
+        if (state == 1):
+            bot.send_message(source, "Current status: ON")
+        elif (state == 0):
+            bot.send_message(source, "Current status: OFF")
+        else:
+            bot.send_message(source, "Error: Invalid status")
+    else:
+        bot.send_message(source, "Invalid command")
 
 def error(bot, update, error):
     """Log Errors caused by Updates."""
@@ -224,13 +293,13 @@ def main():
 
     dp.add_handler(CommandHandler("showid", showid))
     dp.add_handler(CommandHandler("delete", delete))
-    dp.add_handler(CommandHandler("test", delete))
+    dp.add_handler(CommandHandler("status", status))
+    dp.add_handler(CommandHandler("setstatus", setstatus))
     dp.add_handler(MessageHandler(Filters.text, publish))
     dp.add_handler(MessageHandler(Filters.photo | Filters.document | Filters.voice | Filters.video | Filters.sticker | Filters.video_note | Filters.contact | Filters.venue | Filters.location, forward))
     dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, new_chat_members))
     dp.add_handler(MessageHandler(Filters.status_update.left_chat_member, left_chat_member))
     dp.add_handler(MessageHandler(Filters.text, edit, message_updates = False, channel_post_updates = False, edited_updates = True))
-    #dp.add_handler(MessageHandler(Filters.all, fallback))
 
     # log all errors
     dp.add_error_handler(error)

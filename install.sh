@@ -12,7 +12,10 @@ rm -f /tmp/$SERVICE_NAME
 
 diff -q $P/bot.py bot.py > /dev/null 2>&1 || sudo cp bot.py $P/
 diff -q $P/Pipfile Pipfile > /dev/null 2>&1 || (sudo cp Pipfile $P/ && echo 1 > /tmp/$SERVICE_NAME)
-diff -q $P/Pipfile.lock Pipfile.lock > /dev/null 2>&1 || (sudo cp Pipfile.lock $P/ && echo 1 > /tmp/$SERVICE_NAME)
+
+if [ ! -e $P/Pipfile.lock ]; then
+    echo 1 > /tmp/$SERVICE_NAME
+fi
 
 if [ -e /tmp/$SERVICE_NAME ] && [ `cat /tmp/$SERVICE_NAME` == 1 ]; then
     cd $P
